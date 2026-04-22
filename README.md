@@ -83,3 +83,4 @@ SpartanGold is designed to allow students to experiment with a Bitcoin-like cryp
 - Prashant Pardeshi's thesis implemented [TontineCoin](https://scholarworks.sjsu.edu/etd_projects/914/), a proof-of-stake cryptocurrency.  [His implementation](https://github.com/prashantp-git/TontineCoin) combined a TenderMint-like protocol with the Tontine financial structure.
 - Dishen Zhao created [SpartanGoldPrime](https://github.com/Witidek/spartan-gold-prime), which uses Primecoin's proof-of-work mechanism to search for prime number chains. 
 - Aaron Smith [integrated zk-SNARKs into SpartanGold](https://github.com/aaronsjsu/Cryptocurrency-zkSNARK-Project) to provide anonymous transactions, following the work of Zcash.
+# cs168-finalproject
