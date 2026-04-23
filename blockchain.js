@@ -75,6 +75,7 @@ module.exports = class Blockchain {
 
     // Initializing starting balances in the genesis block.
     g.balances = new Map(bc.initialBalances);
+    g.merkleRoot = g.constructor.calculateMerkleRoot(g.transactions);
 
     for (let client of bc.clients) {
       client.setGenesisBlock(g);
@@ -104,6 +105,7 @@ module.exports = class Blockchain {
       o.balances.forEach(([clientID,amount]) => {
         b.balances.set(clientID, amount);
       });
+      b.merkleRoot = o.merkleRoot || b.constructor.calculateMerkleRoot(b.transactions);
     } else {
       b.prevBlockHash = o.prevBlockHash;
       b.proof = o.proof;
@@ -114,6 +116,7 @@ module.exports = class Blockchain {
         let tx = this.makeTransaction(txJson);
         b.transactions.set(txID, tx);
       });
+      b.merkleRoot = o.merkleRoot || b.constructor.calculateMerkleRoot(b.transactions);
     }
 
     return b;
