@@ -48,6 +48,8 @@ module.exports = class Block {
     //   return JSON.stringify(Array.from(this.balances.entries()));
     // }
 
+    // Merkle root for the block's transactions.
+    this.merkleRoot = this.constructor.calculateMerkleRoot(this.transactions);
 
     // Used to determine the winner between competing chains.
     // Note that this is a little simplistic -- an attacker
@@ -62,6 +64,108 @@ module.exports = class Block {
     this.rewardAddr = rewardAddr;
 
     this.coinbaseReward = coinbaseReward;
+  }
+
+  /**
+   * Builds a Merkle root from the transaction IDs in the block.
+   * The leaves are tx.id values.
+   * Parent = hash(left + right).
+   * If odd number of leaves, duplicate the last one.
+   *
+   * @param {Map} transactions - Map of tx.id -> transaction
+   * @returns {String} - Merkle root hash
+   */
+  static calculateMerkleRoot(transactions) {
+    let hashes = Array.from(transactions.values()).map(tx => tx.id);
+
+    if (hashes.length === 0) {
+      return utils.hash("EMPTY");
+    }
+
+    while (hashes.length > 1) {
+      let nextLevel = [];
+
+      for (let i = 0; i < hashes.length; i += 2) {
+        let left = hashes[i];
+        let right = (i + 1 < hashes.length) ? hashes[i + 1] : left;
+        nextLevel.push(utils.hash(left + right));
+      }
+
+      hashes = nextLevel;
+    }
+
+    return hashes[0];
+  }
+
+  /**
+   * Builds a Merkle proof for a transaction in this block.
+   * The proof is an array of sibling hashes plus which side they were on.
+   *
+   * @param {String} txId - The transaction ID to prove.
+   * @returns {Array|null} - Proof array, or null if txId is not in the block.
+   */
+  getMerkleProof(txId) {
+    let hashes = Array.from(this.transactions.values()).map(tx => tx.id);
+    let index = hashes.indexOf(txId);
+
+    if (index === -1) return null;
+    if (hashes.length === 0) return null;
+
+    let proof = [];
+
+    while (hashes.length > 1) {
+      let nextLevel = [];
+
+      for (let i = 0; i < hashes.length; i += 2) {
+        let left = hashes[i];
+        let right = (i + 1 < hashes.length) ? hashes[i + 1] : left;
+
+        // If target hash is in this pair, note the sibling.
+        if (i === index || i + 1 === index) {
+          if (index === i) {
+            // target = left, sibling = right
+            proof.push({ position: "right", hash: right });
+          } else {
+            // target = right, sibling = left
+            proof.push({ position: "left", hash: left });
+          }
+
+          index = nextLevel.length;
+        }
+
+        nextLevel.push(utils.hash(left + right));
+      }
+
+      hashes = nextLevel;
+    }
+
+    return proof;
+  }
+
+  /**
+   * Verifies a Merkle proof against a given Merkle root.
+   *
+   * @param {String} txId - The transaction ID being verified.
+   * @param {Array} proof - Array returned by getMerkleProof(txId).
+   * @param {String} merkleRoot - Expected Merkle root.
+   * @returns {Boolean} - True if proof is valid.
+   */
+  static verifyMerkleProof(txId, proof, merkleRoot) {
+    if (!proof || !Array.isArray(proof)) return false;
+
+    let currentHash = txId;
+
+    for (let step of proof) {
+      if (step.position === "left") {
+        currentHash = utils.hash(step.hash + currentHash);
+      } else if (step.position === "right") {
+        currentHash = utils.hash(currentHash + step.hash);
+      } else {
+        return false;
+      }
+    }
+
+    return currentHash === merkleRoot;
   }
 
   /**
@@ -141,12 +245,14 @@ module.exports = class Block {
       // The genesis block does not contain a proof or transactions,
       // but is the only block than can specify balances.
       o.balances = Array.from(this.balances.entries());
+      o.merkleRoot = this.merkleRoot;
     } else {
       // Other blocks must specify transactions and proof details.
       o.transactions = Array.from(this.transactions.entries());
       o.prevBlockHash = this.prevBlockHash;
       o.proof = this.proof;
       o.rewardAddr = this.rewardAddr;
+      o.merkleRoot = this.merkleRoot;
     }
     return o;
   }
@@ -211,6 +317,9 @@ module.exports = class Block {
     // Adding the transaction to the block
     this.transactions.set(tx.id, tx);
 
+    // Recompute Merkle root whenever transactions change.
+    this.merkleRoot = this.constructor.calculateMerkleRoot(this.transactions);
+
     // Taking gold from the sender
     let senderBalance = this.balanceOf(tx.from);
     this.balances.set(tx.from, senderBalance - tx.totalOutput());
@@ -242,14 +351,24 @@ module.exports = class Block {
 
     // Adding coinbase reward for prevBlock.
     let winnerBalance = this.balanceOf(prevBlock.rewardAddr);
-    if (prevBlock.rewardAddr) this.balances.set(prevBlock.rewardAddr, winnerBalance + prevBlock.totalRewards());
+    if (prevBlock.rewardAddr) {
+      this.balances.set(prevBlock.rewardAddr, winnerBalance + prevBlock.totalRewards());
+    }
 
-    // Re-adding all transactions.
+    let expectedMerkleRoot = this.merkleRoot;
+
     let txs = this.transactions;
     this.transactions = new Map();
+    this.merkleRoot = this.constructor.calculateMerkleRoot(this.transactions);
+
+    // Re-adding all transactions.
     for (let tx of txs.values()) {
       let success = this.addTransaction(tx);
       if (!success) return false;
+    }
+
+    if (expectedMerkleRoot !== undefined && expectedMerkleRoot !== null) {
+      if (this.merkleRoot !== expectedMerkleRoot) return false;
     }
 
     return true;
