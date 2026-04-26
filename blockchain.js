@@ -22,7 +22,11 @@ const DEFAULT_TX_FEE = 1;
 // Note that the genesis block is always considered to be confirmed.
 const CONFIRMED_DEPTH = 6;
 
-
+// Constants
+const TARGET_BLOCK_TIME = .2 * 1000; // x second x 1000 milliseconds per block
+const DIFFICULTY_WINDOW = 5; // adjust every x blocks
+const MAX_ADJUST = 4; // adjust by at most a factor of x, either x times harder or 1/x times easier
+const TARGET_WINDOW_TIME = DIFFICULTY_WINDOW * TARGET_BLOCK_TIME;
 /**
  * The Blockchain class tracks configuration information and settings for the
  * blockchain, as well as some utility methods to allow for easy extensibility.
@@ -99,6 +103,9 @@ module.exports = class Blockchain {
     let b = new this.instance.blockClass();
     b.chainLength = parseInt(o.chainLength, 10);
     b.timestamp = o.timestamp;
+    if (o.target !== undefined) {
+      b.target = BigInt(o.target);
+    }
 
     if (b.isGenesisBlock()) {
       // Balances need to be recreated and restored in a map.
@@ -386,4 +393,79 @@ module.exports = class Blockchain {
     let client = this.clientAddressMap.get(address);
     return client.name;
   }
+
+  /**
+   * Calculates the new proof-of-work target
+   * 
+   * @param {Block} prevBlock - The most recently mined block.
+   * @param {Map} blockMap - A map of block hashes to Block objects, used to traverse the chain.
+   * 
+   * @returns {BigInt} - The new mining target for the next block.
+   */
+  getAdjustedTarget(prevBlock, blockMap) {
+  if (!prevBlock) return this.powTarget;
+
+  // only adjust after every x amount of blocks
+  if (prevBlock.chainLength < DIFFICULTY_WINDOW || prevBlock.chainLength % DIFFICULTY_WINDOW !== 0) {
+    return prevBlock.target;
+  }
+
+  console.log('\n');
+  console.log('=====================================');
+  console.log(` ADJUSTING POW DIFFICULTY at block ${prevBlock.chainLength}`);
+
+  let firstBlock = prevBlock;
+
+  // traverse back through to find the timestamp of the block x blocks ago
+  for (let i = 0; i < DIFFICULTY_WINDOW; i++) {
+    if (!blockMap) return prevBlock.target;
+
+    firstBlock = blockMap.get(firstBlock.prevBlockHash);
+
+    if (!firstBlock) return prevBlock.target;
+  }
+
+  // calculate the time taken to mine the last x blocks (from firstBlock to prevBlock)
+  let actualTime = prevBlock.timestamp - firstBlock.timestamp;
+
+  // calculate the ratio of actual time to expected time
+  let ratio = actualTime / TARGET_WINDOW_TIME;
+
+  // the adjustment ratio to be within the bounds of MAX_ADJUST
+  let targetRatio = Math.max(1 / MAX_ADJUST, Math.min(MAX_ADJUST, ratio));
+
+  console.log('\n');
+  console.log(` actualTime:   ${actualTime} ms`);
+  console.log(` expectedTime: ${TARGET_WINDOW_TIME} ms`);
+  console.log(` ratio:        ${ratio.toFixed(4)}`);
+  console.log(` targetRatio:  ${targetRatio.toFixed(4)}`);
+
+  // we multiply and divide by SCALE to avoid floating point issues.
+  const SCALE = 1000n;
+  let scaledRatio = BigInt(Math.floor(targetRatio * 1000));
+
+  // calculate the new target, adjusting by the target ratio
+  let oldTarget = BigInt(prevBlock.target);
+  let newTarget = (BigInt(prevBlock.target) * scaledRatio) / SCALE;
+
+  // ensure difficulty never drops below the initial baseline
+  if (newTarget > POW_BASE_TARGET) {
+    newTarget = POW_BASE_TARGET;
+  }
+
+  console.log(`\n DYNAMIC POW: old target: ${oldTarget}`);
+  console.log(` DYNAMIC POW: new target: ${newTarget}`);
+
+  if (newTarget < oldTarget) {
+    console.log(` DYNAMIC POW: ↑ Difficulty increased (harder)`);
+  } else if (newTarget > oldTarget) {
+    console.log(` DYNAMIC POW: ↓ Difficulty decreased (easier)`);
+  } else {
+    console.log(` DYNAMIC POW: No change`);
+  }
+
+  console.log('=====================================\n');
+
+  return newTarget;
+}
 };

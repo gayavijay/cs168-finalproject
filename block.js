@@ -240,6 +240,7 @@ module.exports = class Block {
     let o = {
       chainLength: this.chainLength,
       timestamp: this.timestamp,
+      target: this.target.toString(),
     };
     if (this.isGenesisBlock()) {
       // The genesis block does not contain a proof or transactions,

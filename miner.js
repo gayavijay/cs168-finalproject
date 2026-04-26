@@ -50,7 +50,9 @@ module.exports = class Miner extends Client {
    * @param {Set} [txSet] - Transactions the miner has that have not been accepted yet.
    */
   startNewSearch(txSet=new Set()) {
-    this.currentBlock = Blockchain.makeBlock(this.address, this.lastBlock);
+    let bc = Blockchain.getInstance();
+    let adjustedTarget = bc.getAdjustedTarget(this.lastBlock, this.blocks);
+    this.currentBlock = Blockchain.makeBlock(this.address, this.lastBlock, adjustedTarget);
 
     // Merging txSet into the transaction queue.
     // These transactions may include transactions not already included
